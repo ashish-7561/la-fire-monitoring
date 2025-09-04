@@ -8,7 +8,7 @@ from datetime import datetime
 # Config
 # -------------------------
 OPENAQ_BASE_V3 = "https://api.openaq.org/v3"
-OPENAQ_API_KEY = "2bb377049f03246178ba3eac129990f113325cb1c86935ab0aa7c506522d23ce"  # your key
+OPENAQ_API_KEY = "40ae11e826e6fb0bed6712b156ff224312c07a9d2a529f9e623dbb30db0fb695"  # your key
 
 # NASA FIRMS (Collection 7 datasets)
 NASA_FIRMS_URL_VIIRS = "https://firms.modaps.eosdis.nasa.gov/data/active_fire/viirs/snpp-npp-c2/csv/Global_VNP14IMGTDL_NRT.csv"
@@ -171,4 +171,5 @@ with col2:
         st.map(df_aq)
     else:
         st.write("No air quality data available.")
+
 
