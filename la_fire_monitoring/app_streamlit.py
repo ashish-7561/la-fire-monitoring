@@ -171,3 +171,4 @@ with col2:
         st.map(df_aq)
     else:
         st.write("No air quality data available.")
+
