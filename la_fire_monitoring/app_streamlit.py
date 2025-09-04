@@ -1,31 +1,29 @@
 import os
 import requests
 import pandas as pd
-import folium
-from folium.plugins import MarkerCluster
-from streamlit_folium import st_folium
 import streamlit as st
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # -------------------------
 # Config
 # -------------------------
 OPENAQ_BASE_V3 = "https://api.openaq.org/v3"
 
-# NASA FIRMS (no API key needed for public data, just direct CSV)
-NASA_FIRMS_URL = "https://firms.modaps.eosdis.nasa.gov/data/active_fire/c6/csv/MODIS_C6_Global_24h.csv"
+# NASA FIRMS (Collection 7 datasets)
+NASA_FIRMS_URL_VIIRS = "https://firms.modaps.eosdis.nasa.gov/data/active_fire/viirs/snpp-npp-c2/csv/Global_VNP14IMGTDL_NRT.csv"
+NASA_FIRMS_URL_MODIS = "https://firms.modaps.eosdis.nasa.gov/data/active_fire/modis/c6_1/csv/MODIS_C6_1_Global_24h.csv"
 
 # -------------------------
 # Utility functions
 # -------------------------
 def nowcast_pm25(values):
-    """Compute simple NowCast (EPA method simplified)."""
+    """Simple NowCast average."""
     if not values:
         return None
     return round(sum(values) / len(values), 1)
 
 def pm25_to_aqi(pm):
-    """Convert PM2.5 (µg/m³) to AQI (simplified US EPA breakpoints)."""
+    """Convert PM2.5 (µg/m³) to AQI (US EPA breakpoints)."""
     if pm is None:
         return None
     breakpoints = [
@@ -56,9 +54,18 @@ def aqi_category(aqi):
 # -------------------------
 # Data Fetching
 # -------------------------
+@st.cache_data(ttl=3600)
+def fetch_nasa_firms_global():
+    """Fetch NASA FIRMS global active fires (last 24h)."""
+    try:
+        df = pd.read_csv(NASA_FIRMS_URL_VIIRS)
+    except:
+        df = pd.read_csv(NASA_FIRMS_URL_MODIS)
+    return df
+
 @st.cache_data(ttl=600)
 def fetch_openaq_pm25_hours_bbox(west, south, east, north, sensor_limit=20):
-    """Fetch PM2.5 data from OpenAQ API v3 within bounding box."""
+    """Fetch PM2.5 data from OpenAQ API v3 within bounding box (fallback to Los Angeles)."""
     params = {
         "bbox": f"{west},{south},{east},{north}",
         "parameter": "pm25",
@@ -70,14 +77,20 @@ def fetch_openaq_pm25_hours_bbox(west, south, east, north, sensor_limit=20):
     r = requests.get(url, params=params, timeout=60)
     r.raise_for_status()
     results = r.json().get("results", [])
-    sensor_rows = []
 
+    # Fallback if empty
+    if not results:
+        url_city = f"{OPENAQ_BASE_V3}/locations?city=Los%20Angeles&parameter=pm25&limit=20"
+        r = requests.get(url_city, timeout=60)
+        r.raise_for_status()
+        results = r.json().get("results", [])
+
+    sensor_rows = []
     for loc in results:
         coords = loc.get("coordinates") or {}
         lat, lon = coords.get("latitude"), coords.get("longitude")
         if lat is None or lon is None:
             continue
-
         pm = None
         for m in loc.get("parameters", []):
             if m.get("parameter") == "pm25":
@@ -85,8 +98,7 @@ def fetch_openaq_pm25_hours_bbox(west, south, east, north, sensor_limit=20):
                 break
         if pm is None:
             continue
-
-        nc = nowcast_pm25([pm])  # only latest value available
+        nc = nowcast_pm25([pm])
         aqi = pm25_to_aqi(nc if nc is not None else pm)
         sensor_rows.append({
             "location_name": loc.get("name", "Unknown"),
@@ -97,15 +109,8 @@ def fetch_openaq_pm25_hours_bbox(west, south, east, north, sensor_limit=20):
             "lat": lat,
             "lon": lon,
         })
-
     df = pd.DataFrame(sensor_rows)
     return df, results
-
-@st.cache_data(ttl=3600)
-def fetch_nasa_firms_global():
-    """Fetch NASA FIRMS global active fires (last 24h)."""
-    df = pd.read_csv(NASA_FIRMS_URL)
-    return df
 
 # -------------------------
 # Streamlit App
@@ -123,7 +128,6 @@ if region == "Custom Bounding Box":
     east = st.sidebar.number_input("East (lon)", -180.0, 180.0, -114.0)
     north = st.sidebar.number_input("North (lat)", -90.0, 90.0, 42.0)
 else:
-    # Global bounding box
     west, south, east, north = -180, -90, 180, 90
 
 # Data fetching
