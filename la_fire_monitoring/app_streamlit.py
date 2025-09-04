@@ -5,7 +5,7 @@ import streamlit as st
 # -------------------------
 # Config
 # -------------------------
-OPENAQ_BASE_V2 = "https://api.openaq.org/v2"
+WAQI_TOKEN = "3cd76abad0501e79bb285944bee4c559a17d69ba"
 
 # NASA FIRMS (Collection 7 datasets)
 NASA_FIRMS_URL_VIIRS = "https://firms.modaps.eosdis.nasa.gov/data/active_fire/viirs/snpp-npp-c2/csv/Global_VNP14IMGTDL_NRT.csv"
@@ -14,12 +14,6 @@ NASA_FIRMS_URL_MODIS = "https://firms.modaps.eosdis.nasa.gov/data/active_fire/mo
 # -------------------------
 # Utility functions
 # -------------------------
-def nowcast_pm25(values):
-    """Simple NowCast average (basic mean for demo)."""
-    if not values:
-        return None
-    return round(sum(values) / len(values), 1)
-
 def pm25_to_aqi(pm):
     """Convert PM2.5 (µg/m³) to AQI (US EPA breakpoints)."""
     if pm is None:
@@ -62,53 +56,28 @@ def fetch_nasa_firms_global():
     return df
 
 @st.cache_data(ttl=600)
-def fetch_openaq_pm25_hours_bbox(west, south, east, north, sensor_limit=20):
-    """Fetch PM2.5 data from OpenAQ API v2 within bounding box."""
-    params = {
-        "bbox": f"{west},{south},{east},{north}",
-        "parameter": "pm25",
-        "limit": sensor_limit,
-        "sort": "desc",
-        "order_by": "lastUpdated"
-    }
-    url = f"{OPENAQ_BASE_V2}/latest"
-    r = requests.get(url, params=params, timeout=60)
+def fetch_waqi_city(city="Delhi"):
+    """Fetch air quality data from WAQI API for a city."""
+    url = f"https://api.waqi.info/feed/{city}/?token={WAQI_TOKEN}"
+    r = requests.get(url, timeout=60)
     r.raise_for_status()
-    results = r.json().get("results", [])
+    data = r.json()
 
-    # Fallback if empty → try Los Angeles
-    if not results:
-        r = requests.get(
-            url,
-            params={"city": "Los Angeles", "parameter": "pm25", "limit": 20},
-            timeout=60
-        )
-        r.raise_for_status()
-        results = r.json().get("results", [])
+    if data.get("status") != "ok":
+        return pd.DataFrame(), {}
 
-    sensor_rows = []
-    for loc in results:
-        coords = loc.get("coordinates") or {}
-        lat, lon = coords.get("latitude"), coords.get("longitude")
-        if lat is None or lon is None:
-            continue
-        pm = next((m.get("value") for m in loc.get("measurements", []) if m.get("parameter") == "pm25"), None)
-        if pm is None:
-            continue
-        nc = nowcast_pm25([pm])
-        aqi = pm25_to_aqi(nc if nc is not None else pm)
-        sensor_rows.append({
-            "location_name": loc.get("location", "Unknown"),
-            "pm25_latest_ugm3": pm,
-            "pm25_nowcast_ugm3": nc,
-            "aqi_nowcast": aqi,
-            "category": aqi_category(aqi),
-            "lat": lat,
-            "lon": lon,
-        })
+    iaqi = data["data"].get("iaqi", {})
+    pm25 = iaqi.get("pm25", {}).get("v")
 
-    df = pd.DataFrame(sensor_rows)
-    return df, results
+    df = pd.DataFrame([{
+        "city": data["data"].get("city", {}).get("name", city),
+        "pm25_latest_ugm3": pm25,
+        "aqi_nowcast": pm25_to_aqi(pm25),
+        "category": aqi_category(pm25_to_aqi(pm25)),
+        "lat": data["data"]["city"]["geo"][0],
+        "lon": data["data"]["city"]["geo"][1],
+    }])
+    return df, data
 
 # -------------------------
 # Streamlit App
@@ -118,24 +87,16 @@ st.title("🌍 Wildfire & Air Quality Monitoring Dashboard")
 
 # Sidebar
 st.sidebar.header("Configuration")
-region = st.sidebar.selectbox("Region", ["Global", "Custom Bounding Box"])
-
-if region == "Custom Bounding Box":
-    west = st.sidebar.number_input("West (lon)", -180.0, 180.0, -125.0)
-    south = st.sidebar.number_input("South (lat)", -90.0, 90.0, 32.0)
-    east = st.sidebar.number_input("East (lon)", -180.0, 180.0, -114.0)
-    north = st.sidebar.number_input("North (lat)", -90.0, 90.0, 42.0)
-else:
-    west, south, east, north = -180, -90, 180, 90
+city = st.sidebar.text_input("Enter City for Air Quality", "Delhi")
 
 # Data fetching
 st.sidebar.markdown("### Data Sources")
 try:
-    df_aq, _ = fetch_openaq_pm25_hours_bbox(west, south, east, north, sensor_limit=50)
-    st.sidebar.success("✅ OpenAQ v2 connected")
+    df_aq, _ = fetch_waqi_city(city)
+    st.sidebar.success("✅ WAQI connected")
 except Exception as e:
     df_aq = pd.DataFrame()
-    st.sidebar.error(f"OpenAQ error: {e}")
+    st.sidebar.error(f"WAQI error: {e}")
 
 try:
     df_fires = fetch_nasa_firms_global()
@@ -158,7 +119,7 @@ with col1:
         st.write("No fire data available.")
 
 with col2:
-    st.subheader("🌫️ Air Quality — PM₂.₅ NowCast AQI (OpenAQ v2)")
+    st.subheader(f"🌫️ Air Quality — PM₂.₅ NowCast AQI ({city})")
     if not df_aq.empty:
         st.dataframe(df_aq)
         st.map(df_aq)
