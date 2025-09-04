@@ -17,6 +17,7 @@ NASA_FIRMS_URL_MODIS = "https://firms.modaps.eosdis.nasa.gov/data/active_fire/mo
 # ✅ FIX: Use Bearer token format
 HEADERS = {"Authorization": f"Bearer {OPENAQ_API_KEY}"}
 
+
 # -------------------------
 # Utility functions
 # -------------------------
@@ -175,3 +176,4 @@ with col2:
         st.map(df_aq)
     else:
         st.write("No air quality data available.")
+
