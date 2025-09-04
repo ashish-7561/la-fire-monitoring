@@ -8,14 +8,16 @@ from datetime import datetime
 # Config
 # -------------------------
 OPENAQ_BASE_V3 = "https://api.openaq.org/v3"
-OPENAQ_API_KEY = "40ae11e826e6fb0bed6712b156ff224312c07a9d2a529f9e623dbb30db0fb695"  # 🔑 replace with your OpenAQ key
+
+# ✅ Load API key from environment variable
+OPENAQ_API_KEY = os.getenv("OPENAQ_API_KEY")
+if not OPENAQ_API_KEY:
+    st.error("❌ OPENAQ_API_KEY is missing. Please set it as a GitHub Secret or Streamlit Secret.")
+HEADERS = {"X-API-Key": OPENAQ_API_KEY}
 
 # NASA FIRMS (Collection 7 datasets)
 NASA_FIRMS_URL_VIIRS = "https://firms.modaps.eosdis.nasa.gov/data/active_fire/viirs/snpp-npp-c2/csv/Global_VNP14IMGTDL_NRT.csv"
 NASA_FIRMS_URL_MODIS = "https://firms.modaps.eosdis.nasa.gov/data/active_fire/modis/c6_1/csv/MODIS_C6_1_Global_24h.csv"
-
-# ✅ FIX: Correct header format for OpenAQ
-HEADERS = {"X-API-Key": OPENAQ_API_KEY}
 
 # -------------------------
 # Utility functions
@@ -75,9 +77,9 @@ def fetch_openaq_pm25_hours_bbox(west, south, east, north, sensor_limit=20):
         "parameter": "pm25",
         "limit": sensor_limit,
         "sort": "desc",
-        "order_by": "datetimeUpdated"  # ✅ correct field
+        "order_by": "datetimeUpdated"
     }
-    url = f"{OPENAQ_BASE_V3}/latest"  # ✅ FIX: correct endpoint
+    url = f"{OPENAQ_BASE_V3}/latest"
     r = requests.get(url, headers=HEADERS, params=params, timeout=60)
     r.raise_for_status()
     results = r.json().get("results", [])
@@ -171,4 +173,3 @@ with col2:
         st.map(df_aq)
     else:
         st.write("No air quality data available.")
-
