@@ -15,7 +15,8 @@ NASA_FIRMS_URL_VIIRS = "https://firms.modaps.eosdis.nasa.gov/data/active_fire/vi
 NASA_FIRMS_URL_MODIS = "https://firms.modaps.eosdis.nasa.gov/data/active_fire/modis/c6_1/csv/MODIS_C6_1_Global_24h.csv"
 
 # ✅ FIX: Use Bearer token format
-HEADERS = {"Authorization": f"Bearer {OPENAQ_API_KEY}"}
+HEADERS = {"X-API-Key": OPENAQ_API_KEY}
+
 
 
 # -------------------------
@@ -176,4 +177,5 @@ with col2:
         st.map(df_aq)
     else:
         st.write("No air quality data available.")
+
 
