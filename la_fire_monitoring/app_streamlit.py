@@ -1,172 +1,96 @@
-# app_streamlit.py — LA Fire + AQ Monitor (LIVE, with NASA FIRMS API token support)
-
 import os
-import io
-import math
-import time
 import requests
-import datetime as dt
 import pandas as pd
-import numpy as np
-import streamlit as st
 import folium
-from streamlit_folium import st_folium
 from folium.plugins import MarkerCluster
+from streamlit_folium import st_folium
+import streamlit as st
+from datetime import datetime, timedelta
 
-# =========================
-# Page / constants
-# =========================
-st.set_page_config(layout="wide", page_title="LA Fire + AQ Monitor (Live)")
-st.title("Los Angeles Fire Incidents & Air Quality (Live)")
+# -------------------------
+# Config
+# -------------------------
+OPENAQ_BASE_V3 = "https://api.openaq.org/v3"
 
-LA_BBOX = (-118.951721, 33.704538, -117.646374, 34.823302)  # (west, south, east, north)
+# NASA FIRMS (no API key needed for public data, just direct CSV)
+NASA_FIRMS_URL = "https://firms.modaps.eosdis.nasa.gov/data/active_fire/c6/csv/MODIS_C6_Global_24h.csv"
 
-# NASA FIRMS API token (paste yours here or use env variable)
-NASA_TOKEN = os.getenv("FIRMS_TOKEN", "PASTE_YOUR_TOKEN_HERE")
-
-# Base endpoints
-FIRMS_CONUS = "https://firms.modaps.eosdis.nasa.gov/data/active_fire/viirs/csv/VNP14IMGTDL_NRT_CONUS.csv"
-FIRMS_API_BASE = "https://firms.modaps.eosdis.nasa.gov/api/area/csv"
-OPENAQ_BASE_V2 = "https://api.openaq.org/v2"
-
-# =========================
-# Sidebar controls
-# =========================
-with st.sidebar:
-    st.header("Controls")
-    hours_back = st.slider("Fire window (hours)", min_value=3, max_value=72, value=24, step=3)
-    max_fire_points = st.slider("Max fire markers to plot", 100, 5000, 1200, step=100)
-
-    st.markdown("---")
-    pm_sensor_limit = st.slider("Max PM2.5 sensors", min_value=5, max_value=50, value=20, step=5)
-
-    st.markdown("---")
-    st.write("API keys")
-    if NASA_TOKEN and NASA_TOKEN != "PASTE_YOUR_TOKEN_HERE":
-        st.write("FIRMS: ✅ (using NASA API token)")
-    else:
-        st.write("FIRMS: ✅ (fallback to public CONUS CSV)")
-    st.write("OpenAQ: ✅ (using free v2 API)")
-
-# =========================
-# Helpers: AQI (NowCast)
-# =========================
-def nowcast_pm25(last_12_hours):
-    vals = [v for v in last_12_hours if v is not None and not math.isnan(v)]
-    if len(vals) < 2:
+# -------------------------
+# Utility functions
+# -------------------------
+def nowcast_pm25(values):
+    """Compute simple NowCast (EPA method simplified)."""
+    if not values:
         return None
-    cmax, cmin = max(vals), min(vals)
-    if cmax <= 0:
-        return 0.0
-    w = max(0.5, cmin / cmax)
-    vals_rev = list(reversed(vals))
-    weights = np.array([w ** i for i in range(len(vals_rev))])
-    return float(np.sum(weights * vals_rev) / np.sum(weights))
+    return round(sum(values) / len(values), 1)
 
-def pm25_to_aqi(c):
-    if c is None:
+def pm25_to_aqi(pm):
+    """Convert PM2.5 (µg/m³) to AQI (simplified US EPA breakpoints)."""
+    if pm is None:
         return None
-    bps = [
-        (0.0, 9.0, 0, 50),
-        (9.1, 35.4, 51, 100),
+    breakpoints = [
+        (0.0, 12.0, 0, 50),
+        (12.1, 35.4, 51, 100),
         (35.5, 55.4, 101, 150),
-        (55.5, 125.4, 151, 200),
-        (125.5, 225.4, 201, 300),
-        (225.5, 325.4, 301, 500),
+        (55.5, 150.4, 151, 200),
+        (150.5, 250.4,201, 300),
+        (250.5, 350.4,301, 400),
+        (350.5, 500.4,401, 500),
     ]
-    for Clow, Chigh, Ilow, Ihigh in bps:
-        if Clow <= c <= Chigh:
-            return round(((c - Clow) / (Chigh - Clow)) * (Ihigh - Ilow) + Ilow)
+    for bp_low, bp_high, aqi_low, aqi_high in breakpoints:
+        if bp_low <= pm <= bp_high:
+            return round((aqi_high - aqi_low) / (bp_high - bp_low) * (pm - bp_low) + aqi_low)
     return 500
 
 def aqi_category(aqi):
-    if aqi is None: return "Unknown"
+    """Return AQI category string."""
+    if aqi is None:
+        return "Unknown"
     if aqi <= 50: return "Good"
     if aqi <= 100: return "Moderate"
-    if aqi <= 150: return "Unhealthy for Sensitive Groups"
+    if aqi <= 150: return "Unhealthy for Sensitive"
     if aqi <= 200: return "Unhealthy"
     if aqi <= 300: return "Very Unhealthy"
     return "Hazardous"
 
-def aqi_color(aqi):
-    if aqi is None: return "#999999"
-    if aqi <= 50: return "#00e400"
-    if aqi <= 100: return "#ffff00"
-    if aqi <= 150: return "#ff7e00"
-    if aqi <= 200: return "#ff0000"
-    if aqi <= 300: return "#8f3f97"
-    return "#7e0023"
-
-# =========================
-# Data fetchers (cached)
-# =========================
-@st.cache_data(ttl=600)
-def fetch_firms_viirs_bbox(west, south, east, north, hours=24, max_rows=10000):
-    """Fetch VIIRS fire detections (NASA API if token available, else CONUS CSV)."""
-    bbox = f"{west},{south},{east},{north}"
-
-    # Try NASA API if token exists
-    if NASA_TOKEN and NASA_TOKEN != "PASTE_YOUR_TOKEN_HERE":
-        try:
-            url = f"{FIRMS_API_BASE}/VIIRS_NOAA20_NRT/{hours}h/{bbox}"
-            headers = {"Authorization": f"Bearer {NASA_TOKEN}"}
-            r = requests.get(url, headers=headers, timeout=60)
-            r.raise_for_status()
-            df = pd.read_csv(io.StringIO(r.text))
-            df["acq_datetime"] = pd.to_datetime(
-                df["acq_date"].astype(str) + " " + df["acq_time"].astype(str).str.zfill(4),
-                format="%Y-%m-%d %H%M", errors="coerce"
-            )
-            df = df.sort_values("acq_datetime", ascending=False)
-            df["sensor"] = "VIIRS_API"
-            return df.head(max_rows)
-        except Exception as e:
-            st.warning(f"NASA FIRMS API failed, falling back to CONUS CSV. Error: {e}")
-
-    # Fallback: CONUS CSV
-    r = requests.get(FIRMS_CONUS, timeout=60)
-    r.raise_for_status()
-    df = pd.read_csv(io.StringIO(r.text))
-    df = df[(df["longitude"].between(west, east)) & (df["latitude"].between(south, north))]
-    df["acq_datetime"] = pd.to_datetime(
-        df["acq_date"].astype(str) + " " + df["acq_time"].astype(str).str.zfill(4),
-        format="%Y-%m-%d %H%M", errors="coerce"
-    )
-    cutoff = dt.datetime.utcnow() - dt.timedelta(hours=hours)
-    df = df[df["acq_datetime"] >= cutoff]
-    df = df.sort_values("acq_datetime", ascending=False)
-    df["sensor"] = "VIIRS_CONUS"
-    return df.head(max_rows)
-
+# -------------------------
+# Data Fetching
+# -------------------------
 @st.cache_data(ttl=600)
 def fetch_openaq_pm25_hours_bbox(west, south, east, north, sensor_limit=20):
-    """Fetch PM2.5 hourly values from OpenAQ v2 (free, no key)."""
+    """Fetch PM2.5 data from OpenAQ API v3 within bounding box."""
     params = {
+        "bbox": f"{west},{south},{east},{north}",
         "parameter": "pm25",
         "limit": sensor_limit,
         "sort": "desc",
-        "order_by": "lastUpdated",
-        "bbox": f"{west},{south},{east},{north}",
+        "order_by": "lastUpdated"
     }
-    r = requests.get(f"{OPENAQ_BASE_V2}/latest", params=params, timeout=60)
+    url = f"{OPENAQ_BASE_V3}/locations"
+    r = requests.get(url, params=params, timeout=60)
     r.raise_for_status()
     results = r.json().get("results", [])
     sensor_rows = []
 
     for loc in results:
-        if "coordinates" not in loc:
+        coords = loc.get("coordinates") or {}
+        lat, lon = coords.get("latitude"), coords.get("longitude")
+        if lat is None or lon is None:
             continue
-        lat, lon = loc["coordinates"]["latitude"], loc["coordinates"]["longitude"]
-        location_name = loc.get("location", "Unknown")
-        values = [m["value"] for m in loc.get("measurements", []) if m.get("parameter") == "pm25"]
-        if not values:
+
+        pm = None
+        for m in loc.get("parameters", []):
+            if m.get("parameter") == "pm25":
+                pm = m.get("lastValue")
+                break
+        if pm is None:
             continue
-        latest = values[0]
-        nc = nowcast_pm25(values[:12])
-        aqi = pm25_to_aqi(nc if nc is not None else latest)
+
+        nc = nowcast_pm25([pm])  # only latest value available
+        aqi = pm25_to_aqi(nc if nc is not None else pm)
         sensor_rows.append({
-            "location_name": location_name,
-            "pm25_latest_ugm3": latest,
+            "location_name": loc.get("name", "Unknown"),
+            "pm25_latest_ugm3": pm,
             "pm25_nowcast_ugm3": nc,
             "aqi_nowcast": aqi,
             "category": aqi_category(aqi),
@@ -177,84 +101,64 @@ def fetch_openaq_pm25_hours_bbox(west, south, east, north, sensor_limit=20):
     df = pd.DataFrame(sensor_rows)
     return df, results
 
-# =========================
-# UI: Fire + AQ
-# =========================
-col_map, col_right = st.columns([1.1, 1])
+@st.cache_data(ttl=3600)
+def fetch_nasa_firms_global():
+    """Fetch NASA FIRMS global active fires (last 24h)."""
+    df = pd.read_csv(NASA_FIRMS_URL)
+    return df
 
-# ---------- FIRE MAP ----------
-with col_map:
-    st.subheader(f"Active Fire Detections (NASA VIIRS, last {hours_back}h)")
-    try:
-        west, south, east, north = LA_BBOX
-        fires = fetch_firms_viirs_bbox(west, south, east, north, hours=hours_back, max_rows=max_fire_points)
-        if fires.empty:
-            st.warning("No recent VIIRS fire detections found in the selected window.")
-        else:
-            m = folium.Map(location=[34.05, -118.25], zoom_start=9, tiles="cartodbpositron")
-            mc = MarkerCluster().add_to(m)
-            for _, row in fires.iterrows():
-                lat, lon = row["latitude"], row["longitude"]
-                conf = str(row.get("confidence", ""))
-                acq_dt, frp = row.get("acq_datetime"), row.get("frp", "")
-                color = "red" if str(conf).lower() in ["high", "n"] else "orange" if str(conf).lower() in ["nominal","med","medium"] else "yellow"
-                popup = folium.Popup(html=f"""
-                    <b>Sensor:</b> {row['sensor']}<br>
-                    <b>Acquired:</b> {acq_dt}<br>
-                    <b>Confidence:</b> {conf}<br>
-                    <b>FRP:</b> {frp}
-                """, max_width=260)
-                folium.CircleMarker(
-                    location=[lat, lon], radius=5, color=color, fill=True, fill_opacity=0.7, popup=popup
-                ).add_to(mc)
-            st_folium(m, height=520, width=None)
-    except Exception as e:
-        st.exception(e)
+# -------------------------
+# Streamlit App
+# -------------------------
+st.set_page_config(page_title="Fires & Air Quality Dashboard", layout="wide")
+st.title("🌍 Wildfire & Air Quality Monitoring Dashboard")
 
-# ---------- AQI PANEL ----------
-with col_right:
-    st.subheader("Air Quality — PM₂.₅ NowCast AQI (OpenAQ v2)")
-    try:
-        sensors_df, locs_raw = fetch_openaq_pm25_hours_bbox(*LA_BBOX, sensor_limit=pm_sensor_limit)
-        if sensors_df.empty:
-            st.warning("No PM₂.₅ sensors found in OpenAQ for this area/time.")
-        else:
-            worst_row = sensors_df.loc[sensors_df["aqi_nowcast"].idxmax()]
-            city_avg_aqi = int(round(sensors_df["aqi_nowcast"].mean()))
-            c1, c2 = st.columns(2)
-            with c1:
-                st.metric("Citywide average NowCast AQI", f"{city_avg_aqi}")
-            with c2:
-                st.metric("Worst site NowCast AQI", f"{int(worst_row['aqi_nowcast'])}", help=f"{worst_row['location_name']}")
+# Sidebar
+st.sidebar.header("Configuration")
+region = st.sidebar.selectbox("Region", ["Global", "Custom Bounding Box"])
 
-            show_cols = ["location_name", "aqi_nowcast", "category", "pm25_nowcast_ugm3", "pm25_latest_ugm3"]
-            st.dataframe(
-                sensors_df.sort_values("aqi_nowcast", ascending=False)[show_cols].reset_index(drop=True),
-                use_container_width=True
-            )
+if region == "Custom Bounding Box":
+    west = st.sidebar.number_input("West (lon)", -180.0, 180.0, -125.0)
+    south = st.sidebar.number_input("South (lat)", -90.0, 90.0, 32.0)
+    east = st.sidebar.number_input("East (lon)", -180.0, 180.0, -114.0)
+    north = st.sidebar.number_input("North (lat)", -90.0, 90.0, 42.0)
+else:
+    # Global bounding box
+    west, south, east, north = -180, -90, 180, 90
 
-            cat_counts = sensors_df["category"].value_counts().reset_index()
-            cat_counts.columns = ["AQI Category", "Count"]
-            st.bar_chart(cat_counts.set_index("AQI Category"))
+# Data fetching
+st.sidebar.markdown("### Data Sources")
+try:
+    df_aq, _ = fetch_openaq_pm25_hours_bbox(west, south, east, north, sensor_limit=50)
+    st.sidebar.success("✅ OpenAQ v3 connected")
+except Exception as e:
+    df_aq = pd.DataFrame()
+    st.sidebar.error(f"OpenAQ error: {e}")
 
-            st.markdown("*Sensor locations*")
-            m2 = folium.Map(location=[34.05, -118.25], zoom_start=9, tiles="cartodbpositron")
-            for _, r in sensors_df.dropna(subset=["lat","lon"]).iterrows():
-                aqi = r["aqi_nowcast"]
-                folium.CircleMarker(
-                    location=[r["lat"], r["lon"]],
-                    radius=6,
-                    color=aqi_color(aqi),
-                    fill=True,
-                    fill_opacity=0.9,
-                    popup=folium.Popup(f"{r['location_name']} — AQI {int(aqi)} ({aqi_category(aqi)})", max_width=280)
-                ).add_to(m2)
-            st_folium(m2, height=300, width=None)
-    except Exception as e:
-        st.exception(e)
+try:
+    df_fires = fetch_nasa_firms_global()
+    st.sidebar.success("✅ NASA FIRMS connected")
+except Exception as e:
+    df_fires = pd.DataFrame()
+    st.sidebar.error(f"NASA FIRMS error: {e}")
 
-st.markdown("---")
-st.info(
-    "Notes: Fire detections from NASA FIRMS (API with token if available, fallback to public CONUS dataset); "
-    "PM₂.₅ NowCast computed from OpenAQ v2 latest data; AQI categories per EPA 2024 updates."
-)
+# -------------------------
+# Layout
+# -------------------------
+col1, col2 = st.columns(2)
+
+with col1:
+    st.subheader("🔥 Active Fires (NASA FIRMS)")
+    if not df_fires.empty:
+        st.map(df_fires.rename(columns={"latitude": "lat", "longitude": "lon"}))
+        st.write(df_fires.head())
+    else:
+        st.write("No fire data available.")
+
+with col2:
+    st.subheader("🌫️ Air Quality — PM₂.₅ NowCast AQI (OpenAQ v3)")
+    if not df_aq.empty:
+        st.dataframe(df_aq)
+        st.map(df_aq)
+    else:
+        st.write("No air quality data available.")
