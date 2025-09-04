@@ -1,4 +1,4 @@
-import os  
+import os
 import requests
 import pandas as pd
 import streamlit as st
@@ -14,10 +14,8 @@ OPENAQ_API_KEY = "2bb377049f03246178ba3eac129990f113325cb1c86935ab0aa7c506522d23
 NASA_FIRMS_URL_VIIRS = "https://firms.modaps.eosdis.nasa.gov/data/active_fire/viirs/snpp-npp-c2/csv/Global_VNP14IMGTDL_NRT.csv"
 NASA_FIRMS_URL_MODIS = "https://firms.modaps.eosdis.nasa.gov/data/active_fire/modis/c6_1/csv/MODIS_C6_1_Global_24h.csv"
 
-# ✅ FIX: Use Bearer token format
+# ✅ FIX: Correct header format
 HEADERS = {"X-API-Key": OPENAQ_API_KEY}
-
-
 
 # -------------------------
 # Utility functions
@@ -37,9 +35,9 @@ def pm25_to_aqi(pm):
         (12.1, 35.4, 51, 100),
         (35.5, 55.4, 101, 150),
         (55.5, 150.4, 151, 200),
-        (150.5, 250.4,201, 300),
-        (250.5, 350.4,301, 400),
-        (350.5, 500.4,401, 500),
+        (150.5, 250.4, 201, 300),
+        (250.5, 350.4, 301, 400),
+        (350.5, 500.4, 401, 500),
     ]
     for bp_low, bp_high, aqi_low, aqi_high in breakpoints:
         if bp_low <= pm <= bp_high:
@@ -77,7 +75,7 @@ def fetch_openaq_pm25_hours_bbox(west, south, east, north, sensor_limit=20):
         "parameter": "pm25",
         "limit": sensor_limit,
         "sort": "desc",
-        "order_by": "lastUpdated"
+        "order_by": "datetimeLastUpdated"  # ✅ FIX: correct field
     }
     url = f"{OPENAQ_BASE_V3}/locations"
     r = requests.get(url, headers=HEADERS, params=params, timeout=60)
@@ -86,9 +84,8 @@ def fetch_openaq_pm25_hours_bbox(west, south, east, north, sensor_limit=20):
 
     # Fallback if empty
     if not results:
-        url_city = f"{OPENAQ_BASE_V3}/locations"
         r = requests.get(
-            url_city,
+            url,
             headers=HEADERS,
             params={"city": "Los Angeles", "parameter": "pm25", "limit": 20},
             timeout=60
@@ -102,11 +99,7 @@ def fetch_openaq_pm25_hours_bbox(west, south, east, north, sensor_limit=20):
         lat, lon = coords.get("latitude"), coords.get("longitude")
         if lat is None or lon is None:
             continue
-        pm = None
-        for m in loc.get("parameters", []):
-            if m.get("parameter") == "pm25":
-                pm = m.get("lastValue")
-                break
+        pm = next((m.get("lastValue") for m in loc.get("parameters", []) if m.get("parameter") == "pm25"), None)
         if pm is None:
             continue
         nc = nowcast_pm25([pm])
@@ -120,6 +113,7 @@ def fetch_openaq_pm25_hours_bbox(west, south, east, north, sensor_limit=20):
             "lat": lat,
             "lon": lon,
         })
+
     df = pd.DataFrame(sensor_rows)
     return df, results
 
@@ -177,5 +171,4 @@ with col2:
         st.map(df_aq)
     else:
         st.write("No air quality data available.")
-
 
