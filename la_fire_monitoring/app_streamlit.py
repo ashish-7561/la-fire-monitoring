@@ -1,19 +1,11 @@
-import os
 import requests
 import pandas as pd
 import streamlit as st
-from datetime import datetime
 
 # -------------------------
 # Config
 # -------------------------
-OPENAQ_BASE_V3 = "https://api.openaq.org/v3"
-
-# ✅ Load API key from environment variable
-OPENAQ_API_KEY = os.getenv("OPENAQ_API_KEY")
-if not OPENAQ_API_KEY:
-    st.error("❌ OPENAQ_API_KEY is missing. Please set it as a GitHub Secret or Streamlit Secret.")
-HEADERS = {"X-API-Key": OPENAQ_API_KEY}
+OPENAQ_BASE_V2 = "https://api.openaq.org/v2"
 
 # NASA FIRMS (Collection 7 datasets)
 NASA_FIRMS_URL_VIIRS = "https://firms.modaps.eosdis.nasa.gov/data/active_fire/viirs/snpp-npp-c2/csv/Global_VNP14IMGTDL_NRT.csv"
@@ -71,16 +63,16 @@ def fetch_nasa_firms_global():
 
 @st.cache_data(ttl=600)
 def fetch_openaq_pm25_hours_bbox(west, south, east, north, sensor_limit=20):
-    """Fetch PM2.5 data from OpenAQ API v3 within bounding box."""
+    """Fetch PM2.5 data from OpenAQ API v2 within bounding box."""
     params = {
         "bbox": f"{west},{south},{east},{north}",
         "parameter": "pm25",
         "limit": sensor_limit,
         "sort": "desc",
-        "order_by": "datetimeUpdated"
+        "order_by": "lastUpdated"
     }
-    url = f"{OPENAQ_BASE_V3}/latest"
-    r = requests.get(url, headers=HEADERS, params=params, timeout=60)
+    url = f"{OPENAQ_BASE_V2}/latest"
+    r = requests.get(url, params=params, timeout=60)
     r.raise_for_status()
     results = r.json().get("results", [])
 
@@ -88,7 +80,6 @@ def fetch_openaq_pm25_hours_bbox(west, south, east, north, sensor_limit=20):
     if not results:
         r = requests.get(
             url,
-            headers=HEADERS,
             params={"city": "Los Angeles", "parameter": "pm25", "limit": 20},
             timeout=60
         )
@@ -141,7 +132,7 @@ else:
 st.sidebar.markdown("### Data Sources")
 try:
     df_aq, _ = fetch_openaq_pm25_hours_bbox(west, south, east, north, sensor_limit=50)
-    st.sidebar.success("✅ OpenAQ v3 connected")
+    st.sidebar.success("✅ OpenAQ v2 connected")
 except Exception as e:
     df_aq = pd.DataFrame()
     st.sidebar.error(f"OpenAQ error: {e}")
@@ -167,7 +158,7 @@ with col1:
         st.write("No fire data available.")
 
 with col2:
-    st.subheader("🌫️ Air Quality — PM₂.₅ NowCast AQI (OpenAQ v3)")
+    st.subheader("🌫️ Air Quality — PM₂.₅ NowCast AQI (OpenAQ v2)")
     if not df_aq.empty:
         st.dataframe(df_aq)
         st.map(df_aq)
