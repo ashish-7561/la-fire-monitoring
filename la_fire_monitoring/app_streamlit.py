@@ -1,9 +1,8 @@
-# app_streamlit.py — LA Fire + AQ Monitor (LIVE, no API keys needed)
+# app_streamlit.py — LA Fire + AQ Monitor (LIVE)
 
 import os
 import io
 import math
-import time
 import requests
 import datetime as dt
 import pandas as pd
@@ -21,8 +20,13 @@ st.title("Los Angeles Fire Incidents & Air Quality (Live)")
 
 LA_BBOX = (-118.951721, 33.704538, -117.646374, 34.823302)  # (west, south, east, north)
 
-# Base endpoints
+# FIRMS Endpoints
 FIRMS_CONUS = "https://firms.modaps.eosdis.nasa.gov/data/active_fire/viirs/csv/VNP14IMGTDL_NRT_CONUS.csv"
+FIRMS_API = "https://firms.modaps.eosdis.nasa.gov/api/area/csv"
+
+# Your NASA FIRMS Token (put it in Streamlit secrets or env var in production)
+FIRMS_TOKEN = os.getenv("FIRMS_TOKEN") or "eyJ0eXAiOiJKV1QiLCJvcmlnaW4iOiJFYXJ0aGRhdGEgTG9naW4iLCJzaWciOiJlZGxqd3RwdWJrZXlfb3BzIiwiYWxnIjoiUlMyNTYifQ.eyJ0eXBlIjoiVXNlciIsInVpZCI6ImFkaGQ1Njg5IiwiZXhwIjoxNzYyMjE0Mzk5LCJpYXQiOjE3NTY5NzUyODEsImlzcyI6Imh0dHBzOi8vdXJzLmVhcnRoZGF0YS5uYXNhLmdvdiIsImlkZW50aXR5X3Byb3ZpZGVyIjoiZWRsX29wcyIsImFjciI6ImVkbCIsImFzc3VyYW5jZV9sZXZlbCI6M30.Th8Ka13kkUjIY_YWUrzfhU4LtLaYk7ZlVpAtghMrw-dCZLbcrabfoG8hiYoTZQ1bNFavq_oVTZboOYQEbCFSIshr6bNup0yMEdb6hvGJfEEMtU3RAtYVDkCCRRJ8zzKJcAO112Ezva8DfuEF-Eemy9QWSn8xH2jmpB2x7gQqUrfJQIbjc8jrkNVWlyFp-UqDIyxJHtVC6YjUsmMvf54JJqQm7-6dyKiitaExECOgxUYW7PfHGryxtsaM6sZuLHfDXaT0VqRrPYI2-6utY2aEa9E3uyCQ0umgekfhIwME8C8sh_daCn3e48YXzuxGtDbkKX6GuhzIpk0AoSmPcBBB9g"
+
 OPENAQ_BASE_V2 = "https://api.openaq.org/v2"
 
 # =========================
@@ -38,8 +42,11 @@ with st.sidebar:
 
     st.markdown("---")
     st.write("API keys")
-    st.write("FIRMS: ✅ (using public CONUS CSV)")
-    st.write("OpenAQ: ✅ (using free v2 API)")
+    if FIRMS_TOKEN:
+        st.write("FIRMS: ✅ Using NASA API with token")
+    else:
+        st.write("FIRMS: ⚠️ Using slower CONUS CSV fallback")
+    st.write("OpenAQ: ✅ Free v2 API")
 
 # =========================
 # Helpers: AQI (NowCast)
@@ -95,13 +102,26 @@ def aqi_color(aqi):
 # =========================
 @st.cache_data(ttl=600)
 def fetch_firms_viirs_bbox(west, south, east, north, hours=24, max_rows=10000):
-    """Fetch VIIRS fire detections. Uses public CONUS CSV and filters to LA bbox."""
-    r = requests.get(FIRMS_CONUS, timeout=60)
-    r.raise_for_status()
-    df = pd.read_csv(io.StringIO(r.text))
-    # filter by bbox
-    df = df[(df["longitude"].between(west, east)) & (df["latitude"].between(south, north))]
-    # filter by time window
+    """Fetch VIIRS fire detections. Prefer NASA API with token; fallback to CONUS CSV."""
+    try:
+        if FIRMS_TOKEN:
+            bbox = f"{west},{south},{east},{north}"
+            url = f"{FIRMS_API}/VIIRS_NOAA20_NRT/{hours}h/{bbox}"
+            headers = {"Authorization": f"Bearer {FIRMS_TOKEN}"}
+            r = requests.get(url, headers=headers, timeout=60)
+            r.raise_for_status()
+            df = pd.read_csv(io.StringIO(r.text))
+            df["sensor"] = "VIIRS_API"
+        else:
+            raise ValueError("No FIRMS token, using fallback.")
+    except Exception:
+        r = requests.get(FIRMS_CONUS, timeout=60)
+        r.raise_for_status()
+        df = pd.read_csv(io.StringIO(r.text))
+        df = df[(df["longitude"].between(west, east)) & (df["latitude"].between(south, north))]
+        df["sensor"] = "VIIRS_CONUS"
+
+    # datetime + filter
     df["acq_datetime"] = pd.to_datetime(
         df["acq_date"].astype(str) + " " + df["acq_time"].astype(str).str.zfill(4),
         format="%Y-%m-%d %H%M", errors="coerce"
@@ -109,7 +129,6 @@ def fetch_firms_viirs_bbox(west, south, east, north, hours=24, max_rows=10000):
     cutoff = dt.datetime.utcnow() - dt.timedelta(hours=hours)
     df = df[df["acq_datetime"] >= cutoff]
     df = df.sort_values("acq_datetime", ascending=False)
-    df["sensor"] = "VIIRS_CONUS"
     return df.head(max_rows)
 
 @st.cache_data(ttl=600)
@@ -126,9 +145,6 @@ def fetch_openaq_pm25_hours_bbox(west, south, east, north, sensor_limit=20):
     r.raise_for_status()
     results = r.json().get("results", [])
     sensor_rows = []
-
-    now_utc = dt.datetime.utcnow()
-    from_utc = now_utc - dt.timedelta(hours=13)
 
     for loc in results:
         if "coordinates" not in loc:
@@ -192,7 +208,7 @@ with col_map:
 with col_right:
     st.subheader("Air Quality — PM₂.₅ NowCast AQI (OpenAQ v2)")
     try:
-        sensors_df, locs_raw = fetch_openaq_pm25_hours_bbox(*LA_BBOX, sensor_limit=pm_sensor_limit)
+        sensors_df, _ = fetch_openaq_pm25_hours_bbox(*LA_BBOX, sensor_limit=pm_sensor_limit)
         if sensors_df.empty:
             st.warning("No PM₂.₅ sensors found in OpenAQ for this area/time.")
         else:
@@ -232,6 +248,6 @@ with col_right:
 
 st.markdown("---")
 st.info(
-    "Notes: Fire detections from NASA FIRMS VIIRS (public CONUS dataset) filtered to LA County bounding box; "
+    "Notes: Fire detections from NASA FIRMS VIIRS (API or public CONUS dataset) filtered to LA County; "
     "PM₂.₅ NowCast computed from OpenAQ v2 latest data; AQI categories per EPA 2024 updates."
 )
