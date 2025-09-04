@@ -8,20 +8,20 @@ from datetime import datetime
 # Config
 # -------------------------
 OPENAQ_BASE_V3 = "https://api.openaq.org/v3"
-OPENAQ_API_KEY = "40ae11e826e6fb0bed6712b156ff224312c07a9d2a529f9e623dbb30db0fb695"  # your key
+OPENAQ_API_KEY = "40ae11e826e6fb0bed6712b156ff224312c07a9d2a529f9e623dbb30db0fb695"  # 🔑 replace with your OpenAQ key
 
 # NASA FIRMS (Collection 7 datasets)
 NASA_FIRMS_URL_VIIRS = "https://firms.modaps.eosdis.nasa.gov/data/active_fire/viirs/snpp-npp-c2/csv/Global_VNP14IMGTDL_NRT.csv"
 NASA_FIRMS_URL_MODIS = "https://firms.modaps.eosdis.nasa.gov/data/active_fire/modis/c6_1/csv/MODIS_C6_1_Global_24h.csv"
 
-# ✅ FIX: Correct header format
+# ✅ FIX: Correct header format for OpenAQ
 HEADERS = {"X-API-Key": OPENAQ_API_KEY}
 
 # -------------------------
 # Utility functions
 # -------------------------
 def nowcast_pm25(values):
-    """Simple NowCast average."""
+    """Simple NowCast average (basic mean for demo)."""
     if not values:
         return None
     return round(sum(values) / len(values), 1)
@@ -69,20 +69,20 @@ def fetch_nasa_firms_global():
 
 @st.cache_data(ttl=600)
 def fetch_openaq_pm25_hours_bbox(west, south, east, north, sensor_limit=20):
-    """Fetch PM2.5 data from OpenAQ API v3 within bounding box (fallback to Los Angeles)."""
+    """Fetch PM2.5 data from OpenAQ API v3 within bounding box."""
     params = {
         "bbox": f"{west},{south},{east},{north}",
         "parameter": "pm25",
         "limit": sensor_limit,
         "sort": "desc",
-        "order_by": "datetimeLastUpdated"  # ✅ FIX: correct field
+        "order_by": "datetimeUpdated"  # ✅ correct field
     }
-    url = f"{OPENAQ_BASE_V3}/locations"
+    url = f"{OPENAQ_BASE_V3}/latest"  # ✅ FIX: correct endpoint
     r = requests.get(url, headers=HEADERS, params=params, timeout=60)
     r.raise_for_status()
     results = r.json().get("results", [])
 
-    # Fallback if empty
+    # Fallback if empty → try Los Angeles
     if not results:
         r = requests.get(
             url,
@@ -99,13 +99,13 @@ def fetch_openaq_pm25_hours_bbox(west, south, east, north, sensor_limit=20):
         lat, lon = coords.get("latitude"), coords.get("longitude")
         if lat is None or lon is None:
             continue
-        pm = next((m.get("lastValue") for m in loc.get("parameters", []) if m.get("parameter") == "pm25"), None)
+        pm = next((m.get("value") for m in loc.get("measurements", []) if m.get("parameter") == "pm25"), None)
         if pm is None:
             continue
         nc = nowcast_pm25([pm])
         aqi = pm25_to_aqi(nc if nc is not None else pm)
         sensor_rows.append({
-            "location_name": loc.get("name", "Unknown"),
+            "location_name": loc.get("location", "Unknown"),
             "pm25_latest_ugm3": pm,
             "pm25_nowcast_ugm3": nc,
             "aqi_nowcast": aqi,
@@ -171,5 +171,3 @@ with col2:
         st.map(df_aq)
     else:
         st.write("No air quality data available.")
-
-
