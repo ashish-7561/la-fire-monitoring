@@ -1,4 +1,4 @@
-import os 
+import os  
 import requests
 import pandas as pd
 import streamlit as st
@@ -14,7 +14,8 @@ OPENAQ_API_KEY = "2bb377049f03246178ba3eac129990f113325cb1c86935ab0aa7c506522d23
 NASA_FIRMS_URL_VIIRS = "https://firms.modaps.eosdis.nasa.gov/data/active_fire/viirs/snpp-npp-c2/csv/Global_VNP14IMGTDL_NRT.csv"
 NASA_FIRMS_URL_MODIS = "https://firms.modaps.eosdis.nasa.gov/data/active_fire/modis/c6_1/csv/MODIS_C6_1_Global_24h.csv"
 
-HEADERS = {"Authorization": OPENAQ_API_KEY}
+# ✅ FIX: Use Bearer token format
+HEADERS = {"Authorization": f"Bearer {OPENAQ_API_KEY}"}
 
 # -------------------------
 # Utility functions
@@ -84,7 +85,12 @@ def fetch_openaq_pm25_hours_bbox(west, south, east, north, sensor_limit=20):
     # Fallback if empty
     if not results:
         url_city = f"{OPENAQ_BASE_V3}/locations"
-        r = requests.get(url_city, headers=HEADERS, params={"city": "Los Angeles", "parameter": "pm25", "limit": 20}, timeout=60)
+        r = requests.get(
+            url_city,
+            headers=HEADERS,
+            params={"city": "Los Angeles", "parameter": "pm25", "limit": 20},
+            timeout=60
+        )
         r.raise_for_status()
         results = r.json().get("results", [])
 
