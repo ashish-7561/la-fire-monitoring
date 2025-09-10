@@ -46,7 +46,8 @@ def fetch_waqi_city(city="Delhi"):
 def load_forecast_model():
     """Load the pre-trained Prophet model."""
     try:
-        with open("models/aqi_prophet_model.pkl", "rb") as f:
+     # Change it to this correct line:
+with open("app/models/aqi_prophet_model.pkl", "rb") as f:
             model = pickle.load(f)
         return model
     except FileNotFoundError:
