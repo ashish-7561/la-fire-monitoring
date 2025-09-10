@@ -44,18 +44,15 @@ def generate_summary_report(city, aqi_value, aqi_category, impactful_fires, df_f
     st.subheader(f"Today's Environmental Report for {city}")
     summary_container = st.container(border=True)
     
-    # Air Quality Summary
     aqi_color = "green" if aqi_value <= 50 else "orange" if aqi_value <= 100 else "red"
     summary_container.markdown(f"- **Air Quality:** The current AQI is **:{aqi_color}[{aqi_value} ({aqi_category})]**.")
     
-    # Wildfire Summary
     if not impactful_fires.empty:
         closest_fire_km = impactful_fires['distance_km'].iloc[0]
         summary_container.markdown(f"- **Wildfire Threat:** :red[Alert!] At least **{len(impactful_fires)} significant fire(s)** detected within 500km. The closest is **{closest_fire_km:.0f} km** away.")
     else:
         summary_container.markdown("- **Wildfire Threat:** :green[Good news!] No significant wildfires detected within a 500km radius.")
         
-    # Forecast Summary
     if not df_forecast.empty:
         current_avg = df_forecast['avg'].iloc[0]
         future_avg = df_forecast['avg'].iloc[-1]
@@ -134,7 +131,7 @@ st.title("🌍 Wildfire & Air Quality Monitoring Dashboard")
 
 # --- Sidebar ---
 st.sidebar.header("Configuration")
-city = st.sidebar.text_input("Enter City", "Delhi")
+city = st.sidebar.text_input("Enter City", "Visakhapatnam")
 city_coords = None
 df_aq, df_forecast = pd.DataFrame(), pd.DataFrame()
 
@@ -155,13 +152,15 @@ try:
 except Exception:
     df_fires = pd.DataFrame()
     st.sidebar.error(f"NASA FIRMS error.")
+    
+# --- THIS IS THE FIX: This line is now outside the conditional block ---
+impactful_fires_df = analyze_fire_impact(city_coords, df_fires)
 
-# --- NEW: Dynamic Environmental Summary ---
+# --- Dynamic Environmental Summary ---
 st.markdown("---")
 if not df_aq.empty:
     pm25_value = df_aq['pm25_latest_ugm3'].iloc[0]
     aqi_value, aqi_category = pm25_to_aqi(pm25_value)
-    impactful_fires_df = analyze_fire_impact(city_coords, df_fires)
     generate_summary_report(city, aqi_value, aqi_category, impactful_fires_df, df_forecast)
 st.markdown("---")
 
@@ -187,6 +186,7 @@ with col2:
 # --- Wildfire Impact Assessment Section ---
 st.markdown("---")
 st.header("🔬 Wildfire Impact Assessment")
+
 if not impactful_fires_df.empty:
     closest_fire = impactful_fires_df.iloc[0]
     st.warning(f"**Alert:** Found {len(impactful_fires_df)} significant fire(s) within 500km. Closest fire is **{closest_fire['distance_km']:.0f} km** away.")
