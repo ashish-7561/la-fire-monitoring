@@ -19,8 +19,9 @@ def fetch_nasa_firms_global():
     Fetches global fire data, trying the primary VIIRS satellite first
     and falling back to the MODIS satellite if the first is empty or fails.
     """
-    VIIRS_URL = "https://firms.modaps.eosdis.nasa.gov/api/v1/fire/VIIRS_NOAA20_NRT/csv/world/24h"
-    MODIS_URL = "https://firms.modaps.eosdis.nasa.gov/api/v1/fire/MODIS_NRT/csv/world/24h"
+# Change them to the 7-day URLs:
+VIIRS_URL = "https://firms.modaps.eosdis.nasa.gov/api/v1/fire/VIIRS_NOAA20_NRT/csv/world/7d"
+MODIS_URL = "https://firms.modaps.eosdis.nasa.gov/api/v1/fire/MODIS_NRT/csv/world/7d"
     
     try:
         # Try the primary, higher-resolution satellite first
