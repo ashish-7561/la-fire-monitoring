@@ -2,7 +2,7 @@
 # Live Demo Link : https://wildfire-air-quality-dashboard-paxcp2majwsaedsrlerdja.streamlit.app/
 
 An advanced, interactive web dashboard built with Python and Streamlit to monitor environmental conditions globally. This tool provides a unified view of historical wildfire data and live air quality metrics, enhanced with interactive controls and live forecasting.
-->✨ Key Features
+                                                                                                                                                                    ->✨ Key Features
 Interactive Fire Map: Visualizes major historical wildfires on a global map with clickable popups showing details for each event (name, country, date, intensity).
 
 Live Air Quality Monitoring: Fetches real-time air quality data for any city searched by the user from the World Air Quality Index (WAQI) API.
@@ -53,3 +53,4 @@ Run the Streamlit application:
 streamlit run app/app_streamlit.py
 
 The application will open in your web browser.
+
