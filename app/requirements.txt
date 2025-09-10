@@ -1,0 +1,20 @@
+streamlit
+pandas
+numpy
+matplotlib
+plotly
+scikit-learn
+torch
+torchvision
+tqdm
+rasterio
+geopandas
+folium
+streamlit-folium
+pyproj
+shapely
+opencv-python
+scipy
+pillow
+tensorflow  # for LSTM forecasting (optional, you may switch to PyTorch)
+notebook
