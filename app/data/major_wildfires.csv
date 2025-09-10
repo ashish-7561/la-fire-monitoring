@@ -1,1 +1,10 @@
-
+name,country,latitude,longitude,start_date,intensity_frp
+Camp Fire,USA,39.81,-121.44,2018-11-08,9800
+Fort McMurray Fire,Canada,56.72,-111.37,2016-05-01,7500
+Amazon Rainforest Fires,Brazil,-9.47,-62.83,2019-08-15,8200
+Australian Bushfires,Australia,-35.75,149.16,2019-09-01,9500
+Siberian Taiga Fires,Russia,63.44,115.44,2021-06-20,8800
+Greek Wildfires,Greece,38.22,22.15,2021-08-03,6700
+Thomas Fire,USA,34.42,-119.22,2017-12-04,7100
+La Palma Volcano,Spain,28.57,-17.84,2021-09-19,5500
+Turkey Wildfires,Turkey,36.88,30.7,2021-07-28,6200
