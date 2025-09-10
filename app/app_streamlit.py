@@ -24,30 +24,29 @@ def fetch_nasa_firms_global():
     MODIS_URL = "https://firms.modaps.eosdis.nasa.gov/api/v1/fire/MODIS_NRT/csv/world/7d"
     
     try:
-        # Try the primary, higher-resolution satellite first
         df = pd.read_csv(VIIRS_URL)
         if not df.empty:
             return df
     except Exception:
-        # If the primary URL fails, we'll try the fallback
         pass
         
-    # If the primary source was empty or failed, try the fallback satellite
     try:
         df = pd.read_csv(MODIS_URL)
         return df
     except Exception:
-        # If both fail, return an empty dataframe
         return pd.DataFrame()
 
 @st.cache_data(ttl=600)
 def fetch_waqi_city(city="Delhi"):
+    """Fetches WAQI data and returns both the dataframe and the API status."""
     url = f"https://api.waqi.info/feed/{city}/?token={WAQI_TOKEN}"
     r = requests.get(url, timeout=60)
     r.raise_for_status()
     data = r.json()
-    if data.get("status") != "ok":
-        return pd.DataFrame()
+    
+    api_status = data.get("status")
+    if api_status != "ok":
+        return pd.DataFrame(), api_status
     
     iaqi = data["data"].get("iaqi", {})
     pm25 = iaqi.get("pm25", {}).get("v")
@@ -58,7 +57,7 @@ def fetch_waqi_city(city="Delhi"):
         "lat": data["data"]["city"]["geo"][0],
         "lon": data["data"]["city"]["geo"][1],
     }])
-    return df
+    return df, api_status
 
 # -------------------------
 # Forecasting Function
@@ -81,14 +80,21 @@ st.title("🌍 Wildfire & Air Quality Monitoring Dashboard")
 
 # --- Sidebar ---
 st.sidebar.header("Configuration")
-city = st.sidebar.text_input("Enter City", "Delhi")
+city = st.sidebar.text_input("Enter City", "California")
 
 try:
-    df_aq = fetch_waqi_city(city)
-    st.sidebar.success("✅ WAQI city data connected")
+    # Get both dataframe and status from the API call
+    df_aq, api_status = fetch_waqi_city(city)
+    
+    # Check the API status to show the correct sidebar message
+    if api_status == "ok":
+        st.sidebar.success("✅ WAQI city data connected")
+    else:
+        st.sidebar.error("City not found by WAQI API. Please try a specific city name (e.g., Los Angeles).")
+        df_aq = pd.DataFrame() # Ensure dataframe is empty on error
 except Exception as e:
     df_aq = pd.DataFrame()
-    st.sidebar.error(f"WAQI city error: {e}")
+    st.sidebar.error(f"WAQI connection error: {e}")
 
 try:
     df_fires = fetch_nasa_firms_global()
@@ -127,20 +133,17 @@ model = load_forecast_model()
 if model is not None:
     st.success("✅ Forecast model loaded successfully!")
     
-    # Make prediction
     future = model.make_future_dataframe(periods=7)
     forecast = model.predict(future)
 
-    # Display plot
     fig = plot_plotly(model, forecast)
     fig.update_layout(
-        title=f"PM2.5 Forecast for {city}",
+        title=f"PM2.5 Forecast", # Generic title
         xaxis_title="Date",
         yaxis_title="Predicted PM2.5"
     )
     st.plotly_chart(fig, use_container_width=True)
     
-    # Display forecast data
     st.write("Forecast Data:")
     st.dataframe(forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail(7))
 else:
