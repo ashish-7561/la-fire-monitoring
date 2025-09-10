@@ -9,7 +9,7 @@ from prophet.plot import plot_plotly
 # Config
 # -------------------------
 WAQI_TOKEN = "3cd76abad0501e79bb285944bee4c559a17d69ba"
-NASA_FIRMS_URL_VIIRS = "https://firms.modaps.eosdis.nasa.gov/data/active_fire/viirs/snpp-npp-c2/csv/Global_VNP14IMGTDL_NRT.csv"
+NASA_FIRMS_URL_VIIRS = "https://firms.modaps.eosdis.nasa.gov/api/v1/fire/VIIRS_NOAA20_NRT/csv/world/24h"
 
 # -------------------------
 # Data Fetching
