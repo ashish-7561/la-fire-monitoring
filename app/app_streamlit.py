@@ -9,15 +9,35 @@ from prophet.plot import plot_plotly
 # Config
 # -------------------------
 WAQI_TOKEN = "3cd76abad0501e79bb285944bee4c559a17d69ba"
-NASA_FIRMS_URL_VIIRS = "https://firms.modaps.eosdis.nasa.gov/api/v1/fire/VIIRS_NOAA20_NRT/csv/world/24h"
 
 # -------------------------
 # Data Fetching
 # -------------------------
 @st.cache_data(ttl=3600)
 def fetch_nasa_firms_global():
-    df = pd.read_csv(NASA_FIRMS_URL_VIIRS)
-    return df
+    """
+    Fetches global fire data, trying the primary VIIRS satellite first
+    and falling back to the MODIS satellite if the first is empty or fails.
+    """
+    VIIRS_URL = "https://firms.modaps.eosdis.nasa.gov/api/v1/fire/VIIRS_NOAA20_NRT/csv/world/24h"
+    MODIS_URL = "https://firms.modaps.eosdis.nasa.gov/api/v1/fire/MODIS_NRT/csv/world/24h"
+    
+    try:
+        # Try the primary, higher-resolution satellite first
+        df = pd.read_csv(VIIRS_URL)
+        if not df.empty:
+            return df
+    except Exception:
+        # If the primary URL fails for any reason, we'll try the fallback
+        pass
+        
+    # If the primary source was empty or failed, try the fallback satellite
+    try:
+        df = pd.read_csv(MODIS_URL)
+        return df
+    except Exception:
+        # If both fail, return an empty dataframe
+        return pd.DataFrame()
 
 @st.cache_data(ttl=600)
 def fetch_waqi_city(city="Delhi"):
@@ -42,7 +62,6 @@ def fetch_waqi_city(city="Delhi"):
 # -------------------------
 # Forecasting Function
 # -------------------------
-# THE CORRECT CODE
 @st.cache_resource
 def load_forecast_model():
     try:
@@ -51,6 +70,7 @@ def load_forecast_model():
         return model
     except FileNotFoundError:
         return None
+
 # -------------------------
 # Streamlit Layout
 # -------------------------
@@ -71,7 +91,10 @@ except Exception as e:
 
 try:
     df_fires = fetch_nasa_firms_global()
-    st.sidebar.success("✅ NASA FIRMS connected")
+    if not df_fires.empty:
+        st.sidebar.success("✅ NASA FIRMS connected")
+    else:
+        st.sidebar.warning("NASA FIRMS connected, but no fire data in the last 24h.")
 except Exception as e:
     df_fires = pd.DataFrame()
     st.sidebar.error(f"NASA FIRMS error: {e}")
@@ -84,7 +107,7 @@ with col1:
     if not df_fires.empty:
         st.map(df_fires.rename(columns={"latitude": "lat", "longitude": "lon"}))
     else:
-        st.warning("No fire data available.")
+        st.warning("No fire data available in the last 24 hours from VIIRS or MODIS satellites.")
 
 with col2:
     st.subheader("🌫️ Air Quality — PM₂.₅ NowCast")
@@ -120,4 +143,4 @@ if model is not None:
     st.write("Forecast Data:")
     st.dataframe(forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail(7))
 else:
-    st.error("Forecast model file not found. Please run the training script first.")
+    st.error("Forecast model file not found. Please ensure 'app/models/aqi_prophet_model.pkl' exists.")
