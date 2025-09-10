@@ -18,10 +18,10 @@ def fetch_nasa_firms_global():
     """
     Fetches global fire data, trying the primary VIIRS satellite first
     and falling back to the MODIS satellite if the first is empty or fails.
+    We use the 7-day feed to increase the chance of seeing data.
     """
-# Change them to the 7-day URLs:
-VIIRS_URL = "https://firms.modaps.eosdis.nasa.gov/api/v1/fire/VIIRS_NOAA20_NRT/csv/world/7d"
-MODIS_URL = "https://firms.modaps.eosdis.nasa.gov/api/v1/fire/MODIS_NRT/csv/world/7d"
+    VIIRS_URL = "https://firms.modaps.eosdis.nasa.gov/api/v1/fire/VIIRS_NOAA20_NRT/csv/world/7d"
+    MODIS_URL = "https://firms.modaps.eosdis.nasa.gov/api/v1/fire/MODIS_NRT/csv/world/7d"
     
     try:
         # Try the primary, higher-resolution satellite first
@@ -29,7 +29,7 @@ MODIS_URL = "https://firms.modaps.eosdis.nasa.gov/api/v1/fire/MODIS_NRT/csv/worl
         if not df.empty:
             return df
     except Exception:
-        # If the primary URL fails for any reason, we'll try the fallback
+        # If the primary URL fails, we'll try the fallback
         pass
         
     # If the primary source was empty or failed, try the fallback satellite
@@ -95,7 +95,7 @@ try:
     if not df_fires.empty:
         st.sidebar.success("✅ NASA FIRMS connected")
     else:
-        st.sidebar.warning("NASA FIRMS connected, but no fire data in the last 24h.")
+        st.sidebar.warning("NASA FIRMS connected, but no fire data found.")
 except Exception as e:
     df_fires = pd.DataFrame()
     st.sidebar.error(f"NASA FIRMS error: {e}")
@@ -108,7 +108,7 @@ with col1:
     if not df_fires.empty:
         st.map(df_fires.rename(columns={"latitude": "lat", "longitude": "lon"}))
     else:
-        st.warning("No fire data available in the last 24 hours from VIIRS or MODIS satellites.")
+        st.warning("No fire data available in the last 7 days from VIIRS or MODIS satellites.")
 
 with col2:
     st.subheader("🌫️ Air Quality — PM₂.₅ NowCast")
