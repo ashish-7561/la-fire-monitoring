@@ -87,14 +87,7 @@ def create_forecast_plot(df, city):
 def create_interactive_fire_map(df_fires):
     fire_map = folium.Map(location=[20, 0], zoom_start=2, tiles="CartoDB dark_matter")
     for _, row in df_fires.iterrows():
-        html = f"""
-        <h4>{row['name']}</h4>
-        <p>
-        <b>Country:</b> {row['country']}<br>
-        <b>Date:</b> {row['start_date']}<br>
-        <b>Intensity (FRP):</b> {row['intensity_frp']}<br>
-        </p>
-        """
+        html = f"""<h4>{row['name']}</h4><p><b>Country:</b> {row['country']}<br><b>Date:</b> {row['start_date']}<br><b>Intensity (FRP):</b> {row['intensity_frp']}</p>"""
         popup = folium.Popup(html, max_width=300)
         folium.CircleMarker(location=[row['latitude'], row['longitude']], radius=5, color='orangered', fill=True, fill_color='red', popup=popup).add_to(fire_map)
     return fire_map
@@ -105,27 +98,43 @@ def create_interactive_fire_map(df_fires):
 st.set_page_config(page_title="🌍 Fires & Air Quality Dashboard", layout="wide")
 st.title("🌍 Wildfire & Air Quality Monitoring Dashboard")
 
+# --- Data Loading ---
+df_fires = load_historical_fires()
+
 # --- Sidebar ---
 st.sidebar.header("Configuration")
+st.sidebar.subheader("Air Quality Search")
 city = st.sidebar.text_input("Enter City", "Delhi")
 
-# --- Data Loading with Fallback Logic ---
+# --- NEW: Fire Data Filtering Controls ---
+st.sidebar.subheader("Fire Map Filters")
+if not df_fires.empty:
+    country_list = ['All'] + sorted(df_fires['country'].unique())
+    selected_countries = st.sidebar.multiselect("Select Country/Countries", country_list, default=['All'])
+    
+    min_intensity, max_intensity = int(df_fires['intensity_frp'].min()), int(df_fires['intensity_frp'].max())
+    selected_intensity = st.sidebar.slider("Minimum Fire Intensity (FRP)", min_intensity, max_intensity, min_intensity)
+    
+    # Apply filters
+    if 'All' not in selected_countries:
+        df_fires = df_fires[df_fires['country'].isin(selected_countries)]
+    
+    df_fires = df_fires[df_fires['intensity_frp'] >= selected_intensity]
+else:
+    st.sidebar.warning("Fire data not loaded.")
+
+# --- Data Loading with Fallback Logic for AQI ---
 show_fallback_message = False
 try:
     df_aq, df_forecast, api_status = fetch_waqi_data(city)
     if api_status != "ok":
         show_fallback_message = True
-        # If city not found, fall back to a default city
-        df_aq, df_forecast, api_status = fetch_waqi_data("Delhi")
+        df_aq, df_forecast, api_status = fetch_waqi_data("Delhi") # Fallback
 except Exception:
     show_fallback_message = True
-    # If API fails for any reason, fall back to a default city
-    df_aq, df_forecast, api_status = fetch_waqi_data("Delhi")
+    df_aq, df_forecast, api_status = fetch_waqi_data("Delhi") # Fallback
     st.sidebar.error("Could not connect to live AQI data.")
 
-df_fires = load_historical_fires()
-
-# Display a message if we're using fallback data
 if show_fallback_message:
     st.info(f"Could not find live data for '{city}'. Showing results for Delhi instead.", icon="ℹ️")
 
@@ -136,9 +145,9 @@ with col1:
     st.subheader("Major Historical Wildfires")
     if not df_fires.empty:
         fire_map = create_interactive_fire_map(df_fires)
-        st_folium(fire_map, use_container_width=True)
+        st_folium(fire_map, use_container_width=True, height=450)
     else:
-        st.warning("Could not load historical fire data.")
+        st.warning("No historical fire data matches your filter criteria.")
 
 with col2:
     st.subheader("🌫️ Air Quality — PM₂.₅ NowCast")
@@ -159,4 +168,3 @@ if not df_forecast.empty:
     st.plotly_chart(create_forecast_plot(df_forecast, display_city), use_container_width=True)
 else:
     st.warning("Forecast data is not available for this location.")
-
