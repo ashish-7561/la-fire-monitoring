@@ -15,31 +15,54 @@ WAQI_TOKEN = "3cd76abad0501e79bb285944bee4c559a17d69ba"
 # Utility & Analysis Functions
 # -------------------------
 def pm25_to_aqi(pm25_val):
-    if pm25_val is None: return 0
-    if 0 <= pm25_val <= 12.0: return round((50 - 0) / (12.0 - 0) * (pm25_val - 0) + 0)
-    if 12.1 <= pm25_val <= 35.4: return round((100 - 51) / (35.4 - 12.1) * (pm25_val - 12.1) + 51)
-    if 35.5 <= pm25_val <= 55.4: return round((150 - 101) / (55.4 - 35.5) * (pm25_val - 35.5) + 101)
-    if 55.5 <= pm25_val <= 150.4: return round((200 - 151) / (150.4 - 55.5) * (pm25_val - 55.5) + 151)
-    if 150.5 <= pm25_val <= 250.4: return round((300 - 201) / (250.4 - 150.5) * (pm25_val - 150.5) + 201)
-    return 301
+    if pm25_val is None: return 0, "Unknown"
+    aqi = 0
+    if 0 <= pm25_val <= 12.0: aqi = round((50 - 0) / (12.0 - 0) * (pm25_val - 0) + 0)
+    elif 12.1 <= pm25_val <= 35.4: aqi = round((100 - 51) / (35.4 - 12.1) * (pm25_val - 12.1) + 51)
+    elif 35.5 <= pm25_val <= 55.4: aqi = round((150 - 101) / (55.4 - 35.5) * (pm25_val - 35.5) + 101)
+    elif 55.5 <= pm25_val <= 150.4: aqi = round((200 - 151) / (150.4 - 55.5) * (pm25_val - 55.5) + 151)
+    elif 150.5 <= pm25_val <= 250.4: aqi = round((300 - 201) / (250.4 - 150.5) * (pm25_val - 150.5) + 201)
+    else: aqi = 301
+    
+    if aqi <= 50: category = "Good"
+    elif aqi <= 100: category = "Moderate"
+    elif aqi <= 150: category = "Unhealthy for Sensitive Groups"
+    elif aqi <= 200: category = "Unhealthy"
+    elif aqi <= 300: category = "Very Unhealthy"
+    else: category = "Hazardous"
+    return aqi, category
 
 def analyze_fire_impact(city_coords, df_fires):
-    if df_fires.empty or city_coords is None:
-        return pd.DataFrame()
-    
+    if df_fires.empty or city_coords is None: return pd.DataFrame()
     impactful_fires = df_fires[df_fires['confidence'] > 80].copy()
-    if impactful_fires.empty:
-        return pd.DataFrame()
-
+    if impactful_fires.empty: return pd.DataFrame()
     city_lat, city_lon = city_coords
-    impactful_fires['distance_km'] = impactful_fires.apply(
-        lambda row: great_circle((city_lat, city_lon), (row['latitude'], row['longitude'])).kilometers,
-        axis=1
-    )
+    impactful_fires['distance_km'] = impactful_fires.apply(lambda row: great_circle((city_lat, city_lon), (row['latitude'], row['longitude'])).kilometers, axis=1)
+    return impactful_fires[impactful_fires['distance_km'] <= 500].sort_values(by='distance_km').head(10)
+
+def generate_summary_report(city, aqi_value, aqi_category, impactful_fires, df_forecast):
+    st.subheader(f"Today's Environmental Report for {city}")
+    summary_container = st.container(border=True)
     
-    nearby_fires = impactful_fires[impactful_fires['distance_km'] <= 500].sort_values(by='distance_km')
+    # Air Quality Summary
+    aqi_color = "green" if aqi_value <= 50 else "orange" if aqi_value <= 100 else "red"
+    summary_container.markdown(f"- **Air Quality:** The current AQI is **:{aqi_color}[{aqi_value} ({aqi_category})]**.")
     
-    return nearby_fires.head(10)
+    # Wildfire Summary
+    if not impactful_fires.empty:
+        closest_fire_km = impactful_fires['distance_km'].iloc[0]
+        summary_container.markdown(f"- **Wildfire Threat:** :red[Alert!] At least **{len(impactful_fires)} significant fire(s)** detected within 500km. The closest is **{closest_fire_km:.0f} km** away.")
+    else:
+        summary_container.markdown("- **Wildfire Threat:** :green[Good news!] No significant wildfires detected within a 500km radius.")
+        
+    # Forecast Summary
+    if not df_forecast.empty:
+        current_avg = df_forecast['avg'].iloc[0]
+        future_avg = df_forecast['avg'].iloc[-1]
+        if future_avg > current_avg * 1.1: trend = "expected to worsen"
+        elif future_avg < current_avg * 0.9: trend = "expected to improve"
+        else: trend = "expected to remain stable"
+        summary_container.markdown(f"- **Forecast:** The 7-day forecast shows that air quality is **{trend}**.")
 
 # -------------------------
 # Data Fetching
@@ -63,19 +86,15 @@ def fetch_waqi_data(city="Delhi"):
     r = requests.get(url, timeout=60)
     r.raise_for_status()
     data = r.json()
-    
     api_status = data.get("status")
     if api_status != "ok":
         return pd.DataFrame(), pd.DataFrame(), api_status, None
-    
     city_coords = (data["data"]["city"]["geo"][0], data["data"]["city"]["geo"][1])
     pm25 = data["data"].get("iaqi", {}).get("pm25", {}).get("v")
     current_df = pd.DataFrame([{"location": data["data"].get("city", {}).get("name", city), "pm25_latest_ugm3": pm25, "lat": city_coords[0], "lon": city_coords[1]}])
-    
     forecast_data = data["data"].get("forecast", {}).get("daily", {}).get("pm25", [])
     forecast_df = pd.DataFrame(forecast_data) if forecast_data else pd.DataFrame()
     if not forecast_df.empty: forecast_df['day'] = pd.to_datetime(forecast_df['day'])
-        
     return current_df, forecast_df, api_status, city_coords
 
 # -------------------------
@@ -117,6 +136,7 @@ st.title("🌍 Wildfire & Air Quality Monitoring Dashboard")
 st.sidebar.header("Configuration")
 city = st.sidebar.text_input("Enter City", "Delhi")
 city_coords = None
+df_aq, df_forecast = pd.DataFrame(), pd.DataFrame()
 
 try:
     df_aq, df_forecast, api_status, city_coords = fetch_waqi_data(city)
@@ -136,6 +156,15 @@ except Exception:
     df_fires = pd.DataFrame()
     st.sidebar.error(f"NASA FIRMS error.")
 
+# --- NEW: Dynamic Environmental Summary ---
+st.markdown("---")
+if not df_aq.empty:
+    pm25_value = df_aq['pm25_latest_ugm3'].iloc[0]
+    aqi_value, aqi_category = pm25_to_aqi(pm25_value)
+    impactful_fires_df = analyze_fire_impact(city_coords, df_fires)
+    generate_summary_report(city, aqi_value, aqi_category, impactful_fires_df, df_forecast)
+st.markdown("---")
+
 # --- Main Dashboard ---
 col1, col2 = st.columns([2, 1])
 
@@ -150,19 +179,14 @@ with col1:
 with col2:
     st.subheader("🌫️ Air Quality — PM₂.₅ NowCast")
     if not df_aq.empty:
-        pm25_value = df_aq['pm25_latest_ugm3'].iloc[0]
-        aqi_value = pm25_to_aqi(pm25_value)
         st.plotly_chart(create_aqi_gauge(aqi_value), use_container_width=True)
-        # --- THIS IS THE FIX ---
-        st.map(df_aq) # This line adds the map back
+        st.map(df_aq)
     else:
         st.warning("No air quality data available.")
 
 # --- Wildfire Impact Assessment Section ---
 st.markdown("---")
 st.header("🔬 Wildfire Impact Assessment")
-impactful_fires_df = analyze_fire_impact(city_coords, df_fires)
-
 if not impactful_fires_df.empty:
     closest_fire = impactful_fires_df.iloc[0]
     st.warning(f"**Alert:** Found {len(impactful_fires_df)} significant fire(s) within 500km. Closest fire is **{closest_fire['distance_km']:.0f} km** away.")
@@ -174,7 +198,6 @@ else:
 # --- Forecast Section ---
 st.markdown("---")
 st.header("🔮 Live 7-Day Air Quality Forecast")
-
 if not df_forecast.empty:
     st.plotly_chart(create_forecast_plot(df_forecast, city), use_container_width=True)
 else:
