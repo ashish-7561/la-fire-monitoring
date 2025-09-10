@@ -19,3 +19,4 @@ pillow
 tensorflow  # for LSTM forecasting (optional, you may switch to PyTorch)
 notebook
 prophet
+geopy
