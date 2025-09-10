@@ -3,6 +3,8 @@ import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 from geopy.distance import great_circle
+import folium
+from streamlit_folium import st_folium
 
 # -------------------------
 # Config
@@ -22,26 +24,22 @@ def pm25_to_aqi(pm25_val):
     return 301
 
 def analyze_fire_impact(city_coords, df_fires):
-    """Analyzes the impact of nearby fires on a given city."""
     if df_fires.empty or city_coords is None:
         return pd.DataFrame()
     
-    # Consider only significant fires (high confidence or high intensity)
     impactful_fires = df_fires[df_fires['confidence'] > 80].copy()
     if impactful_fires.empty:
         return pd.DataFrame()
 
-    # Calculate distance for each fire
     city_lat, city_lon = city_coords
     impactful_fires['distance_km'] = impactful_fires.apply(
         lambda row: great_circle((city_lat, city_lon), (row['latitude'], row['longitude'])).kilometers,
         axis=1
     )
     
-    # Keep only fires within a 500km radius
     nearby_fires = impactful_fires[impactful_fires['distance_km'] <= 500].sort_values(by='distance_km')
     
-    return nearby_fires.head(10) # Return top 10 closest significant fires
+    return nearby_fires.head(10)
 
 # -------------------------
 # Data Fetching
@@ -100,6 +98,36 @@ def create_forecast_plot(df, city):
     fig.update_layout(title=f"Live PM2.5 Forecast for {city}", xaxis_title="Date", yaxis_title="Predicted PM2.5", legend_title="Forecast")
     return fig
 
+def create_interactive_fire_map(df_fires):
+    """Creates a folium map with clickable popups for each fire."""
+    # Use a dark theme for the map
+    fire_map = folium.Map(location=[20, 0], zoom_start=2, tiles="CartoDB dark_matter")
+    
+    # To avoid crashing the app with too many points, we'll only plot the 500 most intense fires
+    df_plot = df_fires.sort_values(by='frp', ascending=False).head(500)
+    
+    for _, row in df_plot.iterrows():
+        html = f"""
+        <h4>Fire Hotspot Details</h4>
+        <p>
+        <b>Latitude:</b> {row['latitude']}<br>
+        <b>Longitude:</b> {row['longitude']}<br>
+        <b>Intensity (FRP):</b> {row['frp']}<br>
+        <b>Date Detected:</b> {row['acq_date']}
+        </p>
+        """
+        popup = folium.Popup(html, max_width=300)
+        folium.CircleMarker(
+            location=[row['latitude'], row['longitude']],
+            radius=3,
+            color='orangered',
+            fill=True,
+            fill_color='red',
+            popup=popup
+        ).add_to(fire_map)
+        
+    return fire_map
+
 # -------------------------
 # Streamlit Layout
 # -------------------------
@@ -113,8 +141,7 @@ city_coords = None
 
 try:
     df_aq, df_forecast, api_status, city_coords = fetch_waqi_data(city)
-    if api_status == "ok":
-        st.sidebar.success("✅ WAQI data connected")
+    if api_status == "ok": st.sidebar.success("✅ WAQI data connected")
     else:
         st.sidebar.error("City not found by WAQI API.")
         df_aq, df_forecast = pd.DataFrame(), pd.DataFrame()
@@ -135,8 +162,11 @@ col1, col2 = st.columns([2, 1])
 
 with col1:
     st.subheader("🔥 Active Fires (NASA FIRMS)")
-    if not df_fires.empty: st.map(df_fires.rename(columns={"latitude": "lat", "longitude": "lon"}))
-    else: st.warning("No significant fire data available in the last 7 days.")
+    if not df_fires.empty:
+        fire_map = create_interactive_fire_map(df_fires)
+        st_folium(fire_map, use_container_width=True)
+    else:
+        st.warning("No significant fire data available in the last 7 days.")
 
 with col2:
     st.subheader("🌫️ Air Quality — PM₂.₅ NowCast")
@@ -147,10 +177,9 @@ with col2:
     else:
         st.warning("No air quality data available.")
 
-# --- NEW: Wildfire Impact Assessment Section ---
+# --- Wildfire Impact Assessment Section ---
 st.markdown("---")
 st.header("🔬 Wildfire Impact Assessment")
-
 impactful_fires_df = analyze_fire_impact(city_coords, df_fires)
 
 if not impactful_fires_df.empty:
