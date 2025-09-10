@@ -106,7 +106,7 @@ st.sidebar.header("Configuration")
 st.sidebar.subheader("Air Quality Search")
 city = st.sidebar.text_input("Enter City", "Delhi")
 
-# --- NEW: Fire Data Filtering Controls ---
+# --- Fire Data Filtering Controls ---
 st.sidebar.subheader("Fire Map Filters")
 if not df_fires.empty:
     country_list = ['All'] + sorted(df_fires['country'].unique())
@@ -117,11 +117,26 @@ if not df_fires.empty:
     
     # Apply filters
     if 'All' not in selected_countries:
-        df_fires = df_fires[df_fires['country'].isin(selected_countries)]
+        df_fires_filtered = df_fires[df_fires['country'].isin(selected_countries)]
+    else:
+        df_fires_filtered = df_fires.copy()
     
-    df_fires = df_fires[df_fires['intensity_frp'] >= selected_intensity]
+    df_fires_filtered = df_fires_filtered[df_fires_filtered['intensity_frp'] >= selected_intensity]
 else:
     st.sidebar.warning("Fire data not loaded.")
+    df_fires_filtered = pd.DataFrame()
+
+# --- NEW: AQI Levels Guide ---
+st.sidebar.subheader("Reference")
+with st.sidebar.expander("What do the AQI levels mean?"):
+    st.markdown("""
+    - **🟢 Good (0-50):** Air quality is satisfactory, and air pollution poses little or no risk.
+    - **🟡 Moderate (51-100):** Air quality is acceptable. However, there may be a risk for some people, particularly those who are unusually sensitive to air pollution.
+    - **🟠 Unhealthy for Sensitive Groups (101-150):** Members of sensitive groups may experience health effects. The general public is less likely to be affected.
+    - **🔴 Unhealthy (151-200):** Some members of the general public may experience health effects; members of sensitive groups may experience more serious health effects.
+    - **🟣 Very Unhealthy (201-300):** Health alert: The risk of health effects is increased for everyone.
+    - **🟤 Hazardous (301+):** Health warning of emergency conditions: everyone is more likely to be affected.
+    """)
 
 # --- Data Loading with Fallback Logic for AQI ---
 show_fallback_message = False
@@ -143,8 +158,8 @@ col1, col2 = st.columns([2, 1])
 
 with col1:
     st.subheader("Major Historical Wildfires")
-    if not df_fires.empty:
-        fire_map = create_interactive_fire_map(df_fires)
+    if not df_fires_filtered.empty:
+        fire_map = create_interactive_fire_map(df_fires_filtered)
         st_folium(fire_map, use_container_width=True, height=450)
     else:
         st.warning("No historical fire data matches your filter criteria.")
