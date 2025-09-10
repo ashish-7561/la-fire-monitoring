@@ -99,33 +99,12 @@ def create_forecast_plot(df, city):
     return fig
 
 def create_interactive_fire_map(df_fires):
-    """Creates a folium map with clickable popups for each fire."""
-    # Use a dark theme for the map
     fire_map = folium.Map(location=[20, 0], zoom_start=2, tiles="CartoDB dark_matter")
-    
-    # To avoid crashing the app with too many points, we'll only plot the 500 most intense fires
     df_plot = df_fires.sort_values(by='frp', ascending=False).head(500)
-    
     for _, row in df_plot.iterrows():
-        html = f"""
-        <h4>Fire Hotspot Details</h4>
-        <p>
-        <b>Latitude:</b> {row['latitude']}<br>
-        <b>Longitude:</b> {row['longitude']}<br>
-        <b>Intensity (FRP):</b> {row['frp']}<br>
-        <b>Date Detected:</b> {row['acq_date']}
-        </p>
-        """
+        html = f"""<h4>Fire Hotspot Details</h4><p><b>Latitude:</b> {row['latitude']}<br><b>Longitude:</b> {row['longitude']}<br><b>Intensity (FRP):</b> {row['frp']}<br><b>Date Detected:</b> {row['acq_date']}</p>"""
         popup = folium.Popup(html, max_width=300)
-        folium.CircleMarker(
-            location=[row['latitude'], row['longitude']],
-            radius=3,
-            color='orangered',
-            fill=True,
-            fill_color='red',
-            popup=popup
-        ).add_to(fire_map)
-        
+        folium.CircleMarker(location=[row['latitude'], row['longitude']], radius=3, color='orangered', fill=True, fill_color='red', popup=popup).add_to(fire_map)
     return fire_map
 
 # -------------------------
@@ -145,7 +124,7 @@ try:
     else:
         st.sidebar.error("City not found by WAQI API.")
         df_aq, df_forecast = pd.DataFrame(), pd.DataFrame()
-except Exception as e:
+except Exception:
     df_aq, df_forecast = pd.DataFrame(), pd.DataFrame()
     st.sidebar.error(f"WAQI connection error.")
 
@@ -153,7 +132,7 @@ try:
     df_fires = fetch_nasa_firms_global()
     if not df_fires.empty: st.sidebar.success("✅ NASA FIRMS connected")
     else: st.sidebar.warning("NASA FIRMS: No fire data found.")
-except Exception as e:
+except Exception:
     df_fires = pd.DataFrame()
     st.sidebar.error(f"NASA FIRMS error.")
 
@@ -174,6 +153,8 @@ with col2:
         pm25_value = df_aq['pm25_latest_ugm3'].iloc[0]
         aqi_value = pm25_to_aqi(pm25_value)
         st.plotly_chart(create_aqi_gauge(aqi_value), use_container_width=True)
+        # --- THIS IS THE FIX ---
+        st.map(df_aq) # This line adds the map back
     else:
         st.warning("No air quality data available.")
 
